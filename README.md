@@ -2,6 +2,10 @@
 
 A cloud STT plugin for [Agent Zero](https://github.com/frdel/agent-zero). Replace the built-in local Whisper with Deepgram or OpenAI Whisper API -- no model downloads, no GPU required.
 
+> [!WARNING]
+> **This repository has not been human-tested.** The plugin was developed and assembled by AI (Agent Zero). Use at your own risk and verify the code before deploying in production.
+
+
 ---
 
 ## Overview
