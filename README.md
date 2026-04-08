@@ -2,6 +2,13 @@
 
 A cloud STT plugin for [Agent Zero](https://github.com/frdel/agent-zero). Replace the built-in local Whisper with Deepgram or OpenAI Whisper API -- no model downloads, no GPU required.
 
+<div align="center">
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/mirecekdg)
+
+</div>
+
+
 > [!WARNING]
 > **This repository has not been human-tested.** The plugin was developed and assembled by AI (Agent Zero). Use at your own risk and verify the code before deploying in production.
 
@@ -151,3 +158,15 @@ When [YATCA](https://github.com/mirecekd/yatca) is installed alongside a0_STTs, 
 ## License
 
 MIT
+
+---
+
+## Support
+
+If you find a0_STTs useful, consider buying me a coffee!
+
+<div align="center">
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/mirecekdg)
+
+</div>
