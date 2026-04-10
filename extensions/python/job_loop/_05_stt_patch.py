@@ -8,10 +8,10 @@ Patches:
 
 from helpers.extension import Extension
 from helpers.print_style import PrintStyle
-from helpers import plugins
 
 PLUGIN_NAME = "stt_providers"
 _WHISPER_PATCH_ATTR = "_stt_providers_patched"
+_YATCA_PATCH_ATTR = "_stt_providers_yatca_patched"
 
 
 class SttProvidersPatch(Extension):
@@ -20,24 +20,31 @@ class SttProvidersPatch(Extension):
         import helpers.whisper as whisper_module
 
         # --- Patch 1: whisper.transcribe for web UI mic input ---
+        # Always patch regardless of current provider setting.
+        # Provider is read dynamically inside patched_transcribe so runtime
+        # switching works without restart.
         if not getattr(whisper_module, _WHISPER_PATCH_ATTR, False):
-            cfg = plugins.get_plugin_config(PLUGIN_NAME) or {}
-            provider = cfg.get("provider", "local")
+            _original_transcribe = whisper_module.transcribe
 
-            if provider != "local":
-                async def patched_transcribe(model_name: str, audio_bytes_b64: str):
+            async def patched_transcribe(model_name: str, audio_bytes_b64: str):
+                try:
                     from usr.plugins.stt_providers.helpers.transcribe import transcribe_with_provider
                     return await transcribe_with_provider(model_name, audio_bytes_b64)
+                except Exception as e:
+                    PrintStyle.error(f"[stt_providers] patched_transcribe error: {e}, falling back to original")
+                    return await _original_transcribe(model_name, audio_bytes_b64)
 
-                whisper_module.transcribe = patched_transcribe
-                setattr(whisper_module, _WHISPER_PATCH_ATTR, True)
-                PrintStyle.standard(
-                    f"[stt_providers] whisper.transcribe patched -> provider: {provider}"
-                )
+            whisper_module.transcribe = patched_transcribe
+            setattr(whisper_module, _WHISPER_PATCH_ATTR, True)
+            PrintStyle.standard(f"[stt_providers] whisper.transcribe patched successfully")
 
-        # --- Patch 2: YATCA voice integration (optional) ---
-        try:
-            from usr.plugins.stt_providers.helpers.yatca_voice import patch_yatca_handle_message
-            patch_yatca_handle_message()  # silent if YATCA not installed
-        except Exception as e:
-            PrintStyle.error(f"[stt_providers] YATCA voice patch error: {e}")
+        # --- Patch 2: YATCA voice integration (optional, idempotent) ---
+        if not getattr(whisper_module, _YATCA_PATCH_ATTR, False):
+            try:
+                from usr.plugins.stt_providers.helpers.yatca_voice import patch_yatca_handle_message
+                patched = patch_yatca_handle_message()
+                if patched:
+                    setattr(whisper_module, _YATCA_PATCH_ATTR, True)
+                    PrintStyle.standard(f"[stt_providers] YATCA voice integration patched")
+            except Exception as e:
+                PrintStyle.error(f"[stt_providers] YATCA voice patch error: {e}")
