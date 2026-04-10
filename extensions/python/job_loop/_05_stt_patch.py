@@ -32,7 +32,11 @@ class SttProvidersPatch(Extension):
                 from usr.plugins.stt_providers.helpers.transcribe import transcribe_with_provider
                 return await transcribe_with_provider(model_name, audio_bytes_b64)
             except Exception as e:
-                PrintStyle.error(f"[stt_providers] error: {e}, falling back to local Whisper")
+                try:
+                    from helpers.print_style import PrintStyle as _PS
+                    _PS.error(f"[stt_providers] error: {e}, falling back to local Whisper")
+                except Exception:
+                    print(f"[stt_providers] error: {e}, falling back to local Whisper")
                 return await _original(model_name, audio_bytes_b64)
 
         whisper_module.transcribe = patched_transcribe
