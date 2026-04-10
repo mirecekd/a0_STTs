@@ -6,7 +6,6 @@ Supports: Deepgram, OpenAI Whisper API, local Whisper (fallback).
 import base64
 import tempfile
 import os
-from typing import Any
 
 from helpers import plugins
 from helpers.print_style import PrintStyle
@@ -18,6 +17,25 @@ def get_config() -> dict:
     """Load plugin config with defaults."""
     cfg = plugins.get_plugin_config(PLUGIN_NAME) or {}
     return cfg
+
+
+def detect_audio_content_type(audio_bytes: bytes) -> tuple[str, str]:
+    """Detect real audio format from magic bytes. Returns (content_type, extension)."""
+    if audio_bytes[:4] == b'RIFF':
+        return 'audio/wav', 'wav'
+    elif audio_bytes[:4] == b'OggS':
+        return 'audio/ogg', 'ogg'
+    elif len(audio_bytes) >= 4 and audio_bytes[:4] == b'\x1a\x45\xdf\xa3':
+        return 'audio/webm', 'webm'
+    elif audio_bytes[:3] == b'ID3' or (len(audio_bytes) >= 2 and audio_bytes[:2] in (b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')):
+        return 'audio/mpeg', 'mp3'
+    elif audio_bytes[:4] == b'fLaC':
+        return 'audio/flac', 'flac'
+    elif len(audio_bytes) >= 8 and audio_bytes[4:8] in (b'ftyp', b'mdat', b'moov'):
+        return 'audio/mp4', 'm4a'
+    else:
+        # Default to webm - most browsers record in webm/opus
+        return 'audio/webm', 'webm'
 
 
 async def transcribe_deepgram(audio_bytes: bytes, cfg: dict) -> dict:
@@ -36,10 +54,14 @@ async def transcribe_deepgram(audio_bytes: bytes, cfg: dict) -> dict:
     if language:
         params["language"] = language
 
+    # Detect REAL content type from magic bytes (browser sends webm, not wav!)
+    content_type, ext = detect_audio_content_type(audio_bytes)
+    PrintStyle.debug(f"[stt_providers] Deepgram audio: {content_type}, {len(audio_bytes)} bytes")
+
     url = "https://api.deepgram.com/v1/listen"
     headers = {
         "Authorization": f"Token {api_key}",
-        "Content-Type": "audio/wav",
+        "Content-Type": content_type,
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -49,15 +71,12 @@ async def transcribe_deepgram(audio_bytes: bytes, cfg: dict) -> dict:
 
     # Extract transcript from Deepgram response
     try:
-        transcript = (
-            data["results"]["channels"][0]["alternatives"][0]["transcript"]
-        )
+        transcript = data["results"]["channels"][0]["alternatives"][0]["transcript"]
     except (KeyError, IndexError):
         transcript = ""
+        PrintStyle.error(f"[stt_providers] Deepgram unexpected response: {data}")
 
-    PrintStyle.debug(f"[stt_providers] Deepgram transcription: '{transcript[:80]}'")
-
-    # Return in whisper-compatible format
+    PrintStyle.debug(f"[stt_providers] Deepgram transcript: '{transcript[:80]}'")
     return {"text": transcript}
 
 
@@ -73,24 +92,23 @@ async def transcribe_openai(audio_bytes: bytes, cfg: dict) -> dict:
     if not api_key:
         raise ValueError("OpenAI API key is not configured.")
 
+    content_type, ext = detect_audio_content_type(audio_bytes)
+
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    # Write audio to temp file - OpenAI API requires multipart form upload
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as f:
         f.write(audio_bytes)
         tmp_path = f.name
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             with open(tmp_path, "rb") as audio_file:
-                files = {"file": ("audio.wav", audio_file, "audio/wav")}
+                files = {"file": (f"audio.{ext}", audio_file, content_type)}
                 data = {"model": model}
                 if language:
                     data["language"] = language
-                response = await client.post(
-                    url, headers=headers, files=files, data=data
-                )
+                response = await client.post(url, headers=headers, files=files, data=data)
                 response.raise_for_status()
                 result = response.json()
     finally:
@@ -100,9 +118,7 @@ async def transcribe_openai(audio_bytes: bytes, cfg: dict) -> dict:
             pass
 
     transcript = result.get("text", "")
-    PrintStyle.debug(f"[stt_providers] OpenAI transcription: '{transcript[:80]}'")
-
-    # Return in whisper-compatible format
+    PrintStyle.debug(f"[stt_providers] OpenAI transcript: '{transcript[:80]}'")
     return {"text": transcript}
 
 
@@ -114,7 +130,6 @@ async def transcribe_with_provider(model_name: str, audio_bytes_b64: str) -> dic
     cfg = get_config()
     provider = cfg.get("provider", "local")
 
-    # Decode base64 audio
     audio_bytes = base64.b64decode(audio_bytes_b64)
 
     if provider == "deepgram":
@@ -122,7 +137,6 @@ async def transcribe_with_provider(model_name: str, audio_bytes_b64: str) -> dic
             return await transcribe_deepgram(audio_bytes, cfg)
         except Exception as e:
             PrintStyle.error(f"[stt_providers] Deepgram error: {e} - falling back to local Whisper")
-            # Fall back to local
             from helpers import whisper as _whisper
             return await _whisper._transcribe(model_name, audio_bytes_b64)
 
@@ -135,6 +149,5 @@ async def transcribe_with_provider(model_name: str, audio_bytes_b64: str) -> dic
             return await _whisper._transcribe(model_name, audio_bytes_b64)
 
     else:
-        # local - use original whisper
         from helpers import whisper as _whisper
         return await _whisper._transcribe(model_name, audio_bytes_b64)
